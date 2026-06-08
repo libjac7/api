@@ -149,3 +149,82 @@ export const obtenerInformacionEmpleados = async (req, res) => {
         });
     }
 };
+
+
+
+
+export const asignarJefeAEmpleado = async (req, res) => {
+
+    const idUsOperador = req.user?.id_usuario;
+    const rolOperador = req.user?.rol ? req.user.rol.toLowerCase().trim() : '';
+
+    const { id_emp, id_jefe } = req.body;
+
+    const rolesPermitidos = ['administrador', 'gerente', 'secretaria'];
+    
+    if (!rolesPermitidos.includes(rolOperador)) {
+        console.warn(`🛑 ACCESO RECHAZADO: El usuario [${idUsOperador}] con rol [${rolOperador}] intentó asignar una jerarquía sin permisos.`);
+        return res.status(403).json({
+            data: { 
+                code: 403, 
+                message: "ACCESO_DENEGADO_ROL_INSUBIDICADO" 
+            }
+        });
+    }
+
+    if (!id_emp || id_emp.trim() === '') {
+        return res.status(400).json({
+            data: { code: 400, message: "ID_EMPLEADO_REQUERIDO" }
+        });
+    }
+
+    try {
+        console.log(`💼 OPERADOR: [${idUsOperador}] (${rolOperador.toUpperCase()}) asignando jefe [${id_jefe}] al empleado [${id_emp}]`);
+
+        const queryCompleta = `
+            SET @codigo = 0, @mensaje = '';
+            CALL sp_asignar_jefe_empleado(?, ?, @codigo, @mensaje);
+            SELECT @codigo AS codigo, @mensaje AS mensaje;
+        `;
+
+        const [results] = await db.query(queryCompleta, [
+            id_emp.trim(), 
+            id_jefe && id_jefe.trim() !== '' ? id_jefe.trim() : null
+        ]);
+
+        const resultVars = results.find(element => Array.isArray(element) && element[0] && 'codigo' in element[0]);
+        
+        if (!resultVars || resultVars.length === 0) {
+            throw new Error("No se pudieron recuperar las variables de salida del procedimiento almacenado.");
+        }
+
+        const { codigo, mensaje } = resultVars[0];
+
+        if (codigo === 1) {
+            console.log(`EITO: Jerarquia asignada correctamente.`);
+            return res.status(200).json({
+                data: {
+                    code: 200,
+                    message: mensaje
+                }
+            });
+        } else {
+            console.warn(`RECHAZADO POR REGLA DE BASE DE DATOS: ${mensaje}`);
+            return res.status(400).json({
+                data: {
+                    code: 400,
+                    message: mensaje
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error("ERROR CRITICO EN ASIGNAR_JEFE_EMPLEADO:", error.message || error);
+        return res.status(500).json({
+            data: {
+                code: 500,
+                message: "ERROR_INTERNO_SERVIDOR_RENDER"
+            }
+        });
+    }
+};
