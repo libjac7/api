@@ -2,50 +2,63 @@
 import db from '../config/db.js';
 
 export const obtenerDetallePlanPagos = async (req, res) => {
-    // validacion
     const idUsAutenticado = req.user?.id_usuario;
     const token = req.headers.authorization;
 
     if (!token) {
         return res.status(401).json({
-            data: {
-                code: 401,
-                message: "TOKEN_DE_ACCESO_REQUERIDO"
-            }
+            data: { code: 401, message: "TOKEN_DE_ACCESO_REQUERIDO" }
         });
     }
 
-    //param
     const { id_plan } = req.params;
 
     if (!id_plan || id_plan.trim() === '') {
         return res.status(400).json({
-            data: {
-                code: 400,
-                message: "PARAMETRO_ID_PLAN_FALTANTE"
-            }
+            data: { code: 400, message: "PARAMETRO_ID_PLAN_FALTANTE" }
         });
     }
 
     try {
-        console.log(`🔎 OPERADOR: [${idUsAutenticado}] consultando Plan de Pagos: [${id_plan.trim()}]`);
+        console.log(` [${idUsAutenticado}] consultando Plan de Pagos: [${id_plan.trim()}]`);
 
-        //Ejecuta el sp
         const queryStr = 'CALL sp_obtener_detalle_plan_pagos(?);';
-        const [rows] = await db.query(queryStr, [id_plan.trim()]);
+        // 1. Obtenemos el resultado 
+        const [resultadoSP] = await db.query(queryStr, [id_plan.trim()]);
 
-        if (!rows || rows[0].length === 0 || rows[0][0].plan_json === null) {
-            console.warn(`PLAN NO ENCONTRADO: El id_plan [${id_plan}] no existe en el sistema.`);
+        if (!resultadoSP || resultadoSP.length === 0 || !resultadoSP[0] || resultadoSP[0].length === 0) {
+            console.warn(`PLAN NO ENCONTRADO: El id_plan [${id_plan}] no existe en la base de datos.`);
             return res.status(404).json({
-                data: {
-                    code: 404,
-                    message: "PLAN_PAGOS_NO_ENCONTRADO"
-                }
+                data: { code: 404, message: "PLAN_PAGOS_NO_ENCONTRADO" }
             });
         }
-        const detallePlan = JSON.parse(rows[0][0].plan_json);
+        const primeraFila = resultadoSP[0][0];
+        const rawData = primeraFila.plan_json;
 
-        //respuesta
+        if (!rawData) {
+            console.warn(`PLAN VACÍO: La columna plan_json devolvió null para el id_plan [${id_plan}].`);
+            return res.status(404).json({
+                data: { code: 404, message: "PLAN_PAGOS_VACIO" }
+            });
+        }
+
+        // Si ya es un objeto de JS, se va directo. 
+        // Si viene como String plano, se le aplica el parseo.
+        let detallePlan;
+        if (typeof rawData === 'string') {
+            try {
+                detallePlan = JSON.parse(rawData);
+            } catch (jsonErr) {
+                console.error("❌ Error parseando string a JSON en controlador:", jsonErr);
+                detallePlan = rawData; 
+            }
+        } else {
+            detallePlan = rawData;
+        }
+
+        console.log(`CONSULTA EXITOSA: Datos del plan [${id_plan}] procesados correctamente.`);
+
+        // 4. Respondemos con la estructura
         return res.status(200).json({
             data: {
                 code: 200,
@@ -55,12 +68,9 @@ export const obtenerDetallePlanPagos = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("ERROR CRÍTICO EN CONTROLADOR DE PLAN DE PAGOS:", error.message || error);
+        console.error(" ERROR CRÍTICO EN CONTROLADOR DE PLAN DE PAGOS:", error.message || error);
         return res.status(500).json({
-            data: {
-                code: 500,
-                message: "ERROR_INTERNO_SERVIDOR_RENDER"
-            }
+            data: { code: 500, message: "ERROR_INTERNO_SERVIDOR_RENDER" }
         });
     }
 };
