@@ -4,7 +4,7 @@ import { enviarRespuesta } from '../utils/response.js';
 export const gestionarExcepcionesMasivas = async (req, res) => {
     const { id_us, modificaciones } = req.body; 
 
-    // 1. VALIDACIÓN DE PARÁMETROS GENERALES
+    // VALIDACIÓN DE PARÁMETROS GENERALES
     if (!id_us || !modificaciones || !Array.isArray(modificaciones) || modificaciones.length === 0) {
         return res.status(400).json(enviarRespuesta('PARAMETROS_FALTANTES', { 
             message: "Se requiere el id_us y un arreglo 'modificaciones' con al menos un elemento." 
@@ -12,14 +12,14 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
     }
 
     try {
-// 2. RECUPERAR Y VALIDAR QUE EL USUARIO DESTINO EXISTA
+// RECUPERAR Y VALIDAR QUE EL USUARIO DESTINO EXISTA
         const [usuarioData] = await db.query('SELECT id_emp FROM usuarios WHERE id_us = ?', [id_us ? id_us.trim() : '']);
         
-        // Validamos de forma estricta si el arreglo está vacío
+        // Valida de forma estricta si el arreglo esta vacio
         if (!usuarioData || usuarioData.length === 0) {
-            console.warn(`⚠️ ADVERTENCIA: Intento de modificar permisos para un id_us inexistente: [${id_us}]`);
+            console.warn(`⚠️ADVERTENCIA: Intento de modificar permisos para un id_us inexistente: [${id_us}]`);
             
-            // 🚀 RETORNO DIRECTO NATIVO: Evita que intermediarios fuercen un código 500 erróneo
+            //  RETORNO DIRECTO NATIVO: Evita que intermediarios fuercen un codigo 500 erroneo
             return res.status(404).json({
                 code: 404,
                 message: `El ID de usuario destino [${id_us || 'vacío'}] no existe en el sistema.`
@@ -28,9 +28,9 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
         
         const id_emp = usuarioData[0].id_emp;
 
-        // 3. CAPTURAR DATOS DEL OPERADOR DESDE EL JWT
+        // CAPTURAR DATOS DEL OPERADOR DESDE EL JWT
         const id_operador = req.user?.id || req.user?.id_usuario || req.user?.id_us;
-        const rol_operador = req.user?.rol; // Extraemos el rol (ej: 'Administrador', 'Supervisor')
+        const rol_operador = req.user?.rol; // Extrae el rol (ej: 'Administrador', 'Supervisor')
 
         if (!id_operador) {
             return res.status(401).json(enviarRespuesta('UNAUTHORIZED', { 
@@ -38,14 +38,14 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             }));
         }
 
-        // 4. VALIDACIÓN DE SEGURIDAD HÍBRIDA (Rol Administrador o Excepción en Tabla)
+        // VALIDACION DE SEGURIDAD HIBRIDA (Rol Administrador o Excepcion en Tabla)
         let tienePermisoOtorgar = false;
 
         if (rol_operador && rol_operador.trim().toLowerCase() === 'administrador') {
-            // Regla por defecto: Si es Administrador, tiene el poder garantizado
+            // Regla por defecto: Si es Administrador puede realizar la transaccion
             tienePermisoOtorgar = true;
         } else {
-            // Regla por excepción: Si no es Admin, buscamos si tiene el permiso 38 ('OTORGAR_PERMISOS') concedido
+            // Regla por excepcion: Si no es Admin, buscamos si tiene el permiso 38 ('OTORGAR_PERMISOS') concedido
             const queryVerificarExcepcion = `
                 SELECT 1 FROM usuario_permisos up
                 INNER JOIN permisos p ON up.id_per = p.id_per
@@ -67,7 +67,7 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
 
         console.log(`Iniciando procesamiento de permisos para el usuario: [${id_us}] | Operador: [${id_operador}] (${rol_operador})`);
 
-        // 5. MAPEO Y EJECUCIÓN ASÍNCRONA DEL LOTE DE MODIFICACIONES
+        // MAPEO Y EJECUCION ASINCRONA DEL LOTE DE MODIFICACIONES
         const promesasOperaciones = modificaciones.map(async (cambio, index) => {
             const { name_per, accion } = cambio;
 
@@ -87,14 +87,14 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             }
             const id_per = permisoData[0].id_per;
 
-            // OPERACIÓN A: RESTABLECER -> Eliminar la fila de la PK compuesta
+            // OPERACION A: RESTABLECER -> Eliminar la fila de la PK compuesta
             if (accionUpper === 'RESTABLECER') {
                 const queryDelete = `DELETE FROM usuario_permisos WHERE id_us = ? AND id_per = ? AND id_emp = ?;`;
                 await db.query(queryDelete, [id_us.trim(), id_per, id_emp]);
                 return { name_per, estado: 'RESTABLECIDO' };
             }
 
-            // OPERACIÓN B: CONCEDER / DENEGAR -> Insert o Update (Upsert) mapeando la PK compuesta de tu captura
+            // OPERACION B: CONCEDER / DENEGAR -> Insert o Update (Upsert)
             const valorPermitido = (accionUpper === 'CONCEDER') ? 1 : 0;
             const queryUpsert = `
                 INSERT INTO usuario_permisos (id_us, id_per, id_emp, permitido)
@@ -107,7 +107,7 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             return { name_per, estado: accionUpper };
         });
 
-        // Ejecución en paralelo atómica
+        // Ejecución en paralelo
         const resultadosLote = await Promise.all(promesasOperaciones);
 
         return res.status(200).json(enviarRespuesta('EXITO', { 
@@ -116,7 +116,7 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
         }));
 
     } catch (error) {
-        console.error("❌ ERROR EN LA GESTIÓN DE PERMISOS:", error.message);
+        console.error("ERROR EN LA GESTION DE PERMISOS:", error.message);
         
         if (
             error.message.includes('PERMISO_NO_EXISTE') || 
