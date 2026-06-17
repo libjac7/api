@@ -54,20 +54,47 @@ export const login = async (req, res) => {
             });
         }
 
-        // datos JWT
+        // 🛡️ CAPTURA DE EXCEPCIONES SINCRONIZADA CON TU MÓDULO MASIVO
+        // Cruzamos 'usuario_permisos' con 'permisos' usando los campos exactos de tu lógica
+        const queryPermisos = `
+            SELECT p.name_per, up.permitido 
+            FROM usuario_permisos up
+            INNER JOIN permisos p ON up.id_per = p.id_per
+            WHERE up.id_us = ?
+        `;
+        const [excepciones] = await db.query(queryPermisos, [usuario.id_us]);
+
+        const permisosAdicionales = [];
+        const permisosDenegados = [];
+
+        // Clasificamos de acuerdo al valor numérico (1 = CONCEDER, 0 = DENEGAR)
+        excepciones.forEach(row => {
+            // Pasamos a minúsculas para que haga match directo con los id ('empleado', 'ruta', etc.) del front
+            const slugPermiso = row.name_per.trim().toLowerCase(); 
+            
+            if (row.permitido === 1) {
+                permisosAdicionales.push(slugPermiso);
+            } else if (row.permitido === 0) {
+                permisosDenegados.push(slugPermiso);
+            }
+        });
+
+        // datos JWT (Inyectando los deltas de acceso reales)
         const payload = {
             id_emp: usuario.id_emp,
             id_usuario: usuario.id_us,
             rol: usuario.name_rol,
-            version: usuario.token_version
+            version: usuario.token_version,
+            permisos: permisosAdicionales, 
+            denegar: permisosDenegados      
         };
 
-        // Token con cigencia de 1H
+        // Token con vigencia de 1H
         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-        console.log(`LOGIN EXITOSO: El usuario [${usuario.id_us}] inicio sesion. Token Version: [${usuario.token_version}].`);
+        console.log(`LOGIN EXITOSO: Usuario [${usuario.id_us}] logueado. Adicionales otorgados: [${permisosAdicionales}], Denegados: [${permisosDenegados}]`);
 
-        // Respuesta
+        // Respuesta armada para el AuthContext de la app móvil
         return res.status(200).json({
             data: {
                 code: 200,
@@ -79,7 +106,9 @@ export const login = async (req, res) => {
                     rol: usuario.name_rol,
                     nombre: usuario.name_emp,
                     apellido: usuario.ape_emp,
-                    es_password_defecto: usuario.es_password_defecto
+                    es_password_defecto: usuario.es_password_defecto,
+                    permisos: permisosAdicionales, 
+                    denegar: permisosDenegados      
                 }
             }
         });

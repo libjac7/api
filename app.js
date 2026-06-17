@@ -9,6 +9,7 @@ import creditoRoutes from './src/routes/credito.routes.js';
 import abonoRoutes from './src/routes/abono.routes.js';
 import rutasCatalogos from './src/routes/catalogos.routes.js';
 import planPagosRoutes from './src/routes/planPagos.route.js'
+import permisos from './src/routes/permisos.routes.js'
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use('/api/creditos', creditoRoutes);
 app.use('/api/abonos', abonoRoutes);
 app.use('/api/catalogos', rutasCatalogos);
 app.use('/api/plan-pagos', planPagosRoutes);
+app.use('/api/permisos', permisos);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Ejecutandose en el puerto ${PORT}`));
