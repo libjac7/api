@@ -284,7 +284,7 @@ if (!validacion || validacion.codigo !== 1) {
 };
 
 //OBTENER CLIENTE
-export const obtenerInformacionClientes = async (req, res) => {
+export const obtenerInformacion = async (req, res) => {
     const idUsuarioOperador = req.user?.id_usuario || req.user?.id_us || req.user?.id;
     const rolOperador = req.user?.rol ? req.user.rol.trim().toLowerCase() : '';
     const { id_jefe, id_asesor, estado_cliente } = req.query;
