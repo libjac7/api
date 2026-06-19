@@ -6,20 +6,18 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
 
     // VALIDACIÓN DE PARÁMETROS GENERALES
     if (!id_us || !modificaciones || !Array.isArray(modificaciones) || modificaciones.length === 0) {
-        return res.status(400).json(enviarRespuesta('PARAMETROS_FALTANTES', { 
-            message: "Se requiere el id_us y un arreglo 'modificaciones' con al menos un elemento." 
-        }));
+        return res.status(400).json({
+            code: 400,
+            message: "Se requiere el id_us y un arreglo 'modificaciones' con al menos un elemento."
+        });
     }
 
     try {
-// RECUPERAR Y VALIDAR QUE EL USUARIO DESTINO EXISTA
+        // RECUPERAR Y VALIDAR QUE EL USUARIO DESTINO EXISTA
         const [usuarioData] = await db.query('SELECT id_emp FROM usuarios WHERE id_us = ?', [id_us ? id_us.trim() : '']);
         
-        // Valida de forma estricta si el arreglo esta vacio
         if (!usuarioData || usuarioData.length === 0) {
-            console.warn(`⚠️ADVERTENCIA: Intento de modificar permisos para un id_us inexistente: [${id_us}]`);
-            
-            //  RETORNO DIRECTO NATIVO: Evita que intermediarios fuercen un codigo 500 erroneo
+            console.warn(`⚠️ ADVERTENCIA: Intento de modificar permisos para un id_us inexistente: [${id_us}]`);
             return res.status(404).json({
                 code: 404,
                 message: `El ID de usuario destino [${id_us || 'vacío'}] no existe en el sistema.`
@@ -30,22 +28,21 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
 
         // CAPTURAR DATOS DEL OPERADOR DESDE EL JWT
         const id_operador = req.user?.id || req.user?.id_usuario || req.user?.id_us;
-        const rol_operador = req.user?.rol; // Extrae el rol (ej: 'Administrador', 'Supervisor')
+        const rol_operador = req.user?.rol; 
 
         if (!id_operador) {
-            return res.status(401).json(enviarRespuesta('UNAUTHORIZED', { 
-                message: "No se pudo identificar las credenciales del operador en el token." 
-            }));
+            return res.status(401).json({
+                code: 401,
+                message: "No se pudo identificar las credenciales del operador (Administrador) en el token."
+            });
         }
 
-        // VALIDACION DE SEGURIDAD HIBRIDA (Rol Administrador o Excepcion en Tabla)
+        // 4VALIDACION DE SEGURIDAD (Rol Administrador o Excepción en Tabla)
         let tienePermisoOtorgar = false;
 
         if (rol_operador && rol_operador.trim().toLowerCase() === 'administrador') {
-            // Regla por defecto: Si es Administrador puede realizar la transaccion
             tienePermisoOtorgar = true;
         } else {
-            // Regla por excepcion: Si no es Admin, buscamos si tiene el permiso 38 ('OTORGAR_PERMISOS') concedido
             const queryVerificarExcepcion = `
                 SELECT 1 FROM usuario_permisos up
                 INNER JOIN permisos p ON up.id_per = p.id_per
@@ -58,11 +55,13 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             }
         }
 
+        // Si no cuenta con el permiso, responde con un 403 real en JSON
         if (!tienePermisoOtorgar) {
-            console.warn(`ACCESO DENEGADO: El operador [${id_operador}] con Rol [${rol_operador}] intentó asignar permisos sin autorización.`);
-            return res.status(403).json(enviarRespuesta('FORBIDDEN', { 
-                message: "Operación rechazada. Su usuario no posee los privilegios necesarios ni el permiso 'OTORGAR_PERMISOS' para delegar o revocar accesos." 
-            }));
+            console.warn(`ACCESO DENEGADO: El operador [${id_operador}] con Rol [${rol_operador}] intentó operar la ruta sin el permiso: [OTORGAR_PERMISOS]`);
+            return res.status(403).json({
+                code: 403,
+                message: "No cuenta con el permiso requerido: [OTORGAR_PERMISOS] para realizar esta operación."
+            });
         }
 
         console.log(`Iniciando procesamiento de permisos para el usuario: [${id_us}] | Operador: [${id_operador}] (${rol_operador})`);
@@ -87,14 +86,14 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             }
             const id_per = permisoData[0].id_per;
 
-            // OPERACION A: RESTABLECER -> Eliminar la fila de la PK compuesta
+            // OPERACIÓN A: RESTABLECER
             if (accionUpper === 'RESTABLECER') {
                 const queryDelete = `DELETE FROM usuario_permisos WHERE id_us = ? AND id_per = ? AND id_emp = ?;`;
                 await db.query(queryDelete, [id_us.trim(), id_per, id_emp]);
                 return { name_per, estado: 'RESTABLECIDO' };
             }
 
-            // OPERACION B: CONCEDER / DENEGAR -> Insert o Update (Upsert)
+            // OPERACIÓN B: CONCEDER / DENEGAR
             const valorPermitido = (accionUpper === 'CONCEDER') ? 1 : 0;
             const queryUpsert = `
                 INSERT INTO usuario_permisos (id_us, id_per, id_emp, permitido)
@@ -123,14 +122,16 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
             error.message.includes('ACCION_INVALIDA') || 
             error.message.includes('CAMPOS_INCOMPLETOS')
         ) {
-            return res.status(400).json(enviarRespuesta('PARAMETROS_INVALIDOS', { 
-                message: error.message 
-            }));
+            return res.status(400).json({
+                code: 400,
+                message: error.message
+            });
         }
         
-        return res.status(500).json(enviarRespuesta('ERROR_SERVIDOR', {
+        return res.status(500).json({
+            code: 500,
             message: "Error crítico interno en el servidor al escribir las excepciones de permisos.",
             error_developer: error.message
-        }));
+        });
     }
 };
