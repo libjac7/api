@@ -135,3 +135,66 @@ export const gestionarExcepcionesMasivas = async (req, res) => {
         });
     }
 };
+export const obtenerExcepcionesUsuario = async (req, res) => {
+  const { id_us } = req.params;
+
+  try {
+    // Validacion de entrada de seguridad
+    if (!id_us || String(id_us).trim() === '') {
+      return res.status(400).json({
+        code: 400,
+        message: "El parámetro id_us es mandatorio."
+      });
+    }
+
+    // Ejecuta SP
+    const [rows] = await db.query('CALL sp_obtener_matriz_permisos_usuario(?)', [id_us]);
+    const datasetPermisos = rows[0] || [];
+
+    // Resultado
+    const excepcionesFormateadas = datasetPermisos.map(item => {
+      let esAdicional = false;
+      let esDenegado = false;
+
+      // Si hay un registro en la tabla usuario_permisos (estado_excepcion no es null)
+      if (item.estado_excepcion !== null) {
+        if (item.estado_excepcion === 0 && item.pertenece_al_rol === 1) {
+          esDenegado = true; // Era de su rol pero se lo quitaron 
+        } else if (item.estado_excepcion === 1 && item.pertenece_al_rol === 0) {
+          esAdicional = true; // No era de su rol pero se lo regalaron 
+        }
+      }
+
+      return {
+        name_per: item.name_per,
+        permitido: item.estado_excepcion !== null ? item.estado_excepcion : item.pertenece_al_rol,
+        es_adicional: esAdicional,
+        es_denegado: esDenegado
+      };
+    });
+
+    return res.status(200).json({
+      code: 200,
+      message: "Matriz de seguridad procesada.",
+      data: {
+        id_us,
+        excepciones: excepcionesFormateadas
+      }
+    });
+
+  } catch (error) {
+    console.error("Error en obtenerExcepcionesUsuario:", error.message);
+
+    if (error.message?.includes('ERROR_USUARIO_NO_EXISTE')) {
+      return res.status(444).json({ code: 444, message: "El usuario ingresado no existe en el sistema." });
+    }
+    if (error.message?.includes('ERROR_USUARIO_INACTIVO')) {
+      return res.status(403).json({ code: 403, message: "Operación denegada. El usuario se encuentra inactivo." });
+    }
+
+    return res.status(500).json({
+      code: 500,
+      message: "Error interno del servidor al procesar la matriz de accesos."
+    });
+  }
+};
