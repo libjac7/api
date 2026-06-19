@@ -8,6 +8,10 @@ const mapearMensajeBD = (msg) => {
     if (msg === 'email repetido') return 'EMAIL_REPETIDO';
     if (msg === 'DPI ya se encuentra registrado') return 'DPI_REPETIDO';
     if (msg === 'ID de empleado ya existe') return 'DPI_REPETIDO';
+    if (msg === 'EMPLEADO_NO_EXISTE') return 'EMPLEADO_NO_EXISTE';
+    if (msg === 'UBICACION_INCONSISTENTE') return 'UBICACION_INCONSISTENTE';
+    if (msg === 'ESTADO_INVALIDO') return 'ESTADO_INVALIDO';
+    if (msg === 'OPERADOR_INVALIDO_O_SUSPENDIDO') return 'OPERADOR_INVALIDO_O_SUSPENDIDO';
     
     return 'CATALOGO_INVALIDO'; 
 };
@@ -150,9 +154,6 @@ export const obtenerInformacionEmpleados = async (req, res) => {
     }
 };
 
-
-
-
 export const asignarJefeAEmpleado = async (req, res) => {
 
     const idUsOperador = req.user?.id_usuario;
@@ -225,6 +226,147 @@ export const asignarJefeAEmpleado = async (req, res) => {
                 code: 500,
                 message: "ERROR_INTERNO_SERVIDOR_RENDER"
             }
+        });
+    }
+};
+
+export const actualizarEmpleado = async (req, res) => {
+    // Middleware del JWT
+    const idUsOperador = req.user?.id_usuario || req.user?.id;
+    const rolCrudo = req.user && req.user.rol ? req.user.rol : '';
+    const rolOperador = rolCrudo.trim().toLowerCase();
+    
+    const permisosAdicionales = (req.user?.permisos || []).map(p => p.trim().toLowerCase());
+    const permisosDenegados = (req.user?.denegar || []).map(p => p.trim().toLowerCase());
+
+    console.log(`INTENTO DE ACTUALIZACIÓN -> Operador: [${idUsOperador}] | Rol: '${rolOperador}'`);
+
+    // Seguridad jerarquica
+    const esAdmin = rolOperador === 'administrador';
+    const tieneRolAncestral = ['gerente', 'secretaria'].includes(rolOperador);
+    const tienePermisoConcedido = permisosAdicionales.includes('actualizar_empleados');
+    const tienePermisoDenegado = permisosDenegados.includes('actualizar_empleados'); 
+
+    let accesoConcedido = false;
+
+    if (esAdmin) {
+        accesoConcedido = true; 
+    } else if (tienePermisoDenegado) {
+        accesoConcedido = false; 
+    } else if (tieneRolAncestral || tienePermisoConcedido) {
+        accesoConcedido = true; 
+    }
+
+    if (!accesoConcedido) {
+        console.warn(`ACCESO RECHAZADO -> El operador [${idUsOperador}] no cuenta con los privilegios requeridos.`);
+        return res.status(403).json({
+            data: { code: 403, message: 'ROL_NO_AUTORIZADO' }
+        });
+    }
+
+    // Validacion del ID dinamico de la URL
+    const { id } = req.params; 
+    if (!id || id === 'null' || id === 'undefined' || id.trim() === '') {
+        return res.status(400).json({
+            data: { code: 400, message: 'PARAMETROS_INVALIDOS' }
+        });
+    }
+
+    // validación de tipos del Body
+    const reglasValidacion = [
+        { valor: req.body.name_emp, tipoEsperado: 'string' },
+        { valor: req.body.ape_emp, tipoEsperado: 'string' },
+        { valor: req.body.dpi_emp, tipoEsperado: 'string' },
+        { valor: req.body.id_dep, tipoEsperado: 'number' },
+        { valor: req.body.id_muni, tipoEsperado: 'number' },
+        { valor: req.body.direc_cli, tipoEsperado: 'string' },
+        { valor: req.body.tel_emp, tipoEsperado: 'string' },
+        { valor: req.body.id_est, tipoEsperado: 'number' },
+        { valor: req.body.id_rol, tipoEsperado: 'number' }
+    ];
+
+    for (const campo of reglasValidacion) {
+        if (campo.valor === null || campo.valor === undefined || (campo.tipoEsperado === 'string' && campo.valor.trim() === '')) {
+            return res.status(400).json({
+                data: { code: 400, message: 'PARAMETROS_FALTANTES' }
+            });
+        }
+        if (typeof campo.valor !== campo.tipoEsperado) {
+            return res.status(400).json({
+                data: { code: 400, message: 'PARAMETROS_INVALIDOS' }
+            });
+        }
+    }
+
+    if (req.body.id_jefe !== null && req.body.id_jefe !== undefined) {
+        if (typeof req.body.id_jefe !== 'string' || req.body.id_jefe.trim() === '') {
+            return res.status(400).json({
+                data: { code: 400, message: 'PARAMETROS_INVALIDOS' }
+            });
+        }
+    }
+
+    const { 
+        id_jefe, name_emp, ape_emp, dpi_emp, email_emp, id_dep, 
+        id_muni, direc_cli, tel_emp, id_est, id_rol 
+    } = req.body;
+
+    try {
+        console.log(`rocesando SPs en BD para el empleado: [${id}]...`);
+
+        // SP de Validacion
+        const queryVal = `
+            CALL sp_validar_datos_actualizar_empleado(?, ?, ?, ?, ?, ?, ?, ?, @cod, @men);
+            SELECT @cod AS codigo, @men AS mensaje;
+        `;
+        const [rawResult] = await db.query(queryVal, [
+            id, email_emp, dpi_emp, id_muni, id_dep, id_rol, id_est, idUsOperador
+        ]);
+        const validacion = rawResult[1][0];
+
+        if (!validacion || validacion.codigo !== 1) {
+            const claveError = validacion ? mapearMensajeBD(validacion.mensaje) : 'DATOS_INVALIDOS';
+            const estatusHTTP = (claveError.endsWith('_REPETIDO')) ? 409 : 400;
+            
+            return res.status(estatusHTTP).json({
+                data: {
+                    code: estatusHTTP,
+                    message: claveError
+                }
+            }); 
+        }
+
+        // SP de Actualizar 
+        const queryUpd = `
+            CALL sp_actualizar_empleado_usuario(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @codUpd, @menUpd);
+        `;
+        const [updateResult] = await db.query(queryUpd, [
+            id, id_jefe, name_emp, ape_emp, dpi_emp, email_emp, id_dep, id_muni, 
+            direc_cli, tel_emp, id_est, id_rol, idUsOperador
+        ]);
+
+        // 
+        const infoAfectada = updateResult && updateResult[0] && updateResult[0][0] ? updateResult[0][0] : {};
+
+        console.log(`✅ Empleado [${id}] actualizado exitosamente.`);
+        
+        // RETORNO 
+        return res.status(200).json({
+            data: {
+                code: 200,
+                message: "ACTUALIZADO_CON_EXITO",
+                colaborador: {
+                    nombre: infoAfectada.name_emp || name_emp,
+                    apellido: infoAfectada.ape_emp || ape_emp,
+                    estado_actual: infoAfectada.name_est || "Activo"
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("ERROR CRITICO EN EL CONTROLADOR DE ACTUALIZACION DE EMPLEADOS:", error);
+        return res.status(500).json({
+            data: { code: 500, message: 'ERROR_SERVIDOR' }
         });
     }
 };
